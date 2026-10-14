@@ -23,3 +23,22 @@ UE的宏:就类似一个贴纸。后面的类或者函数就是贴纸的内容�
 不用vector的erase，会有额外的性能损耗。
 四、项目进展
 今天写了几个类里面的函数来负责处理敌人被弱点攻击的弱点匹配情况。
+更正：
+1。能不能 memcpy → 看 is_trivially_copyable（跟是不是标准布局无关）能不能跨语言（C）安全使用、能不能序列化 → 才需要 is_standard_layout
+「一个 struct 里有 public 和 private 两种成员，能 memcpy 吗？」 正确答案：能。 它是 trivially copyable，只是不是 standard-layout，所以不能交给 C 程序用。
+成员重排不影响 memcpy（memcpy 是按字节复制整个对象，不管内部怎么排），它影响的是**"能不能和 C 语言共享内存布局"**
+2。在菱形继承中，让 A 和 B 都「虚继承」C（虚基类），这样 D 中只会有一份 C。 （不是"D 虚继承 C"，D 是继承 A 和 B 的那个。）
+3。漏了宏的本质：它在编译之前就被展开替换了。
+宏真正的机制： 预处理器在编译之前做文本替换。UCLASS() 展开后变成一堆 GENERATED_BODY() 相关的代码 + 给 UHT（Unreal Header Tool） 看的标记。UHT 扫描这些标记，生成 .generated.h 里的反射代码。
+ 宏是给 UHT 这个独立工具看的标记，UHT 据此生成反射代码，然后才轮到真正的 C++ 编译。这是"两遍处理"——UHT 一遍，编译器一遍。
+4.模板推导万能引用
+template <typename T>
+void f(T&& x);   // 这不是右值引用，是"万能引用"
+
+int a = 1;
+f(a);    // T 被推导为 int&，不是 int！
+f(1);    // T 被推导为 int
+只有模板参数写成 T&& 时才是万能引用；如果是 std::vector<int>&& 这种有具体类型的，就是普通右值引用。
+5。 引用可以被"绑定"到一个解引用的空指针上，这种代码能编译、UB 在运行时爆发：
+int* p = nullptr;
+int& r = *p;   // 编译通过！
