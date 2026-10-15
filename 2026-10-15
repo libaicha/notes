@@ -1,2 +1,34 @@
 今天学习了剩余的指针和引用的区别，以及内存组织方式，堆，栈，常量，静态变量，全局变量，代码段等的相关知识。以及推进了一节项目的课程，写了敌人受击后出现伤害
-数字以及播放音效和特效的功能。总体来说收获很大。
+数字以及播放音效和特效的功能。总体来说收获很大。#include "GameFramework/WorldSettings.h"
+
+//AWorldSettings::SetTimeDilation(0.01f);//tips:只能用域静态函数
+
+UGameplayStatics::SetGlobalTimeDilation(GetWorld(), 0.01f);
+
+
+
+
+
+if (UGameplayStatics::GetGlobalTimeDilation(GetWorld()) > 0.9f) {
+
+	//AWorldSettings::SetTimeDilation(0.01f);//tips:只能用域静态函数
+
+	UGameplayStatics::SetGlobalTimeDilation(GetWorld(), 0.01f);
+
+	GetWorld()->GetTimerManager().SetTimer(
+
+		dilatonHandle,
+
+		this,
+
+		&ABattleEnemyBase::ResetDilation,
+
+		0.0005f,
+
+		false
+
+	);
+
+}
+
+
