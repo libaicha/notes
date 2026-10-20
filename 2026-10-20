@@ -1,0 +1,65 @@
+5. 深拷贝 vs 浅拷贝
+一句话答案  浅拷贝只按位复制成员的值，如果成员里有裸指针，两个对象就指向同一块堆内存；深
+源。
+拷贝会为指针成员重新分配一块内存，把内容复制过去，使两个对象各自独立、互不影响。C++ 默认
+的拷贝构造/拷贝赋值都是浅拷贝（逐成员复制），这是「一个析构两次 delete 同一指针」崩溃的根
+▍核心要点
+1. 默认拷贝构造函数和默认拷贝赋值运算符执行的是 member-wise copy，即浅拷贝。
+2. 浅拷贝在「成员含裸指针 / 句柄 / 文件描述符」时会产生共享所有权，析构时会 double free，或修
+改一方影响另一方。
+3. 深拷贝必须自己实现拷贝构造与拷贝赋值，按值语义分配新资源并复制内容。
+4. 深拷贝有成本：堆分配、逐字节/逐元素复制、缓存不友好；C++11 后更推荐移动语义把「拷贝」变
+成「窃取指针」。
+5. 更好的选择是 Rule of Zero：用 std::string、std::vector、std::unique_ptr 这类值语义/RAII
+成员，让编译器生成的默认拷贝自动变成「安全的深拷贝」。
+▍展开详解
+第一层，浅拷贝的灾难现场：
+struct Buffer {
+   char* data; size_t n;
+   Buffer(size_t n) : data(new char[n]), n(n) {}
+   ~Buffer() { delete[] data; }   //  
+};
+Buffer a(8); Buffer b = a;   
+没写拷贝构造 默认浅拷贝
+→ 
+      // b.data == a.data
+// 作用域结束：a、b  各 delete[]  
+→ 
+一次同一地址 double free
+第二个变体更隐蔽：赋值时 a = b，a 原有的 data 直接泄漏（指针被覆盖，旧内存再也没人
+delete）。所以「三法则」之所以存在，就是因为一旦你手动管理资源，析构、拷贝构造、拷贝赋值必
+须同时写（见第 6 节）。
+第二层，正确的深拷贝实现要处理三件事：自我赋值安全、异常安全、旧资源释放。
+Buffer(const Buffer& o) : data(new char[o.n]), n(o.n) {
+   std::memcpy(data, o.data, n);
+}
+Buffer& operator=(const Buffer& o) {
+   if (this == &o) return *this;        // 自赋值保护
+   char* tmp = new char[o.n];           // 先分配，失败则原对象不变
+   std::memcpy(tmp, o.data, o.n);
+   delete[] data; data = tmp; n = o.n;
+   return *this;
+}
+工程上更推荐 copy-and-swap：按值传参拿到一份副本，再 swap，把释放旧资源交给副本的析构函数，
+天然自赋值安全且强异常安全。
+第三层，值语义 vs 引用语义。判断「该深拷贝还是共享」的标准不是性能，而是语义：字符串、容
+器、值对象（向量、变换矩阵、FVector）应该深拷贝或值拷贝；纹理、网格、共享配置、UObject 这
+— 14 —
+类大对象应该引用/句柄语义。UE 的 UObject 干脆禁用拷贝构造和拷贝赋值（UObject(const
+UObject&) = delete），只能通过指针/TWeakObjectPtr 引用，GC 负责生命周期——这是引擎级的设
+计选择，用「禁止拷贝」从根本上避免深浅拷贝问题。
+第四层，C++11 之后的演进。拷贝的成本可以被移动替代：把资源指针从源对象「偷」过来并把源置
+空，代价从 O(n) 降到 O(1)。
+Buffer(Buffer&& o) noexcept : data(o.data), n(o.n) {
+   o.data = nullptr; o.n = 0;           // 源对象进入合法可析构状态
+}
+注意两点：移动构造要标 noexcept，否则 std::vector 扩容时会退回拷贝（因为强异常保证要求移动
+不抛）；移动后的源对象必须处于「有效但未指定」的状态，至少能安全析构和赋值。
+第五层，游戏客户端里最容易踩的坑。FString/TArray 在 UE 里是值语义，按值传参会真拷贝
+（TArray 的拷贝是逐元素构造，代价高），所以引擎约定用 const TArray<X>& 传参；自定义资源类
+（FTexture、自定义 MeshData）如果持有裸指针 + 手写析构，就必然落入三法则；用 TSharedPtr 时
+要注意它本身是引用计数语义，拷贝 TSharedPtr 是浅拷贝（共享所有权），不是深拷贝——这题经常
+被追问「shared_ptr 拷贝是深还是浅」：浅，但它是安全的浅拷贝，因为引用计数保证了生命周期。
+第六层，如何测试深浅拷贝是否写对。经典手段：让对象在作用域结束时不崩、用 valgrind/ASan（
+fsanitize=address）跑 double free 检测、以及在 UE 里看 FMemory 分配统计是否随拷贝次数线性增
+长。ASan 对「use-after-free / double-free」的定位在面试里是加分项
