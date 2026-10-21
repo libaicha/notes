@@ -1,0 +1,16 @@
+一句话答案  野指针是「从未被初始化或指向未知地址」的指针，值本身是垃圾；悬垂指针（dangling
+pointer）是「曾经有效、但所指对象已销毁或内存已释放」的指针。两者解引用都是 UB；工程上的
+解决方案是初始化即置空、释放即置空、优先用智能指针/容器/引用把裸指针的使用面压到最小、用
+ASan 这类工具做兜底检测。
+▍核心要点
+1. 野指针的三种来源：未初始化的指针、指向已出作用域的局部变量、指针被 free/delete 后的残留
+值（后者严格说是悬垂）。
+2. 悬垂指针的四种来源：delete 后未置空、返回局部变量的指针/引用、容器扩容/erase 后失效的迭
+代器与指针、对象被 GC/所有权转移后仍被外部持有。
+3. 最有效手段：用 std::unique_ptr/shared_ptr/weak_ptr、std::vector/std::string、引用代替
+裸指针；IDE 与编译器的 -Wuninitialized 能抓一部分。
+4. 惯例：T* p = nullptr; 初始化，delete p; p = nullptr;，这样 delete/判空都不会二次释放。
+5. 检测工具：AddressSanitizer（-fsanitize=address）、Valgrind、MSVC 的 /RTC、UBSan、以及
+UE 的 check()/EnsureCondition 断言。
+6. 多线程下还有一种「逻辑悬垂」：对象还在但状态已被另一个线程清空，用 weak_ptr::lock() 或
+TWeakObjectPtr::IsValid() 做原子有效性检查。
